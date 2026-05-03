@@ -1464,6 +1464,7 @@ pub enum TelemetryEvent {
         source: LoginEventSource,
     },
     TabRenamed(TabRenameEvent),
+    PlanTitleRenamed,
     MoveActiveTab {
         direction: TabMovement,
     },
@@ -3097,6 +3098,7 @@ impl TelemetryEvent {
                 Some(json!(payload))
             }
             TelemetryEvent::TabRenamed(rename_event) => Some(json!(rename_event)),
+            TelemetryEvent::PlanTitleRenamed => None,
             TelemetryEvent::MoveActiveTab { direction } => Some(json!({ "direction": direction })),
             TelemetryEvent::MoveTab { direction } => Some(json!({ "direction": direction })),
             TelemetryEvent::TabOperations { action } => Some(json!({ "action": action })),
@@ -4689,6 +4691,7 @@ impl TelemetryEvent {
             | TelemetryEvent::AuthToggleFAQ { .. }
             | TelemetryEvent::OpenAuthPrivacySettings { .. }
             | TelemetryEvent::TabRenamed(_)
+            | TelemetryEvent::PlanTitleRenamed
             | TelemetryEvent::MoveActiveTab { .. }
             | TelemetryEvent::MoveTab { .. }
             | TelemetryEvent::DragAndDropTab
@@ -5247,6 +5250,7 @@ impl TelemetryEventDesc for TelemetryEventDiscriminants {
             Self::AuthToggleFAQ => EnablementState::Always,
             Self::OpenAuthPrivacySettings => EnablementState::Always,
             Self::TabRenamed => EnablementState::Always,
+            Self::PlanTitleRenamed => EnablementState::Always,
             Self::MoveActiveTab => EnablementState::Always,
             Self::MoveTab => EnablementState::Always,
             Self::DragAndDropTab => EnablementState::Always,
@@ -5751,6 +5755,7 @@ impl TelemetryEventDesc for TelemetryEventDiscriminants {
             Self::AuthToggleFAQ => "Auth: Toggle Common Questions",
             Self::OpenAuthPrivacySettings => "Auth: Open Privacy Settings Overlay",
             Self::TabRenamed => "Tab Renamed",
+            Self::PlanTitleRenamed => "Plan Title Renamed",
             Self::MoveActiveTab => "Move Active Tab",
             Self::MoveTab => "Move Tab",
             Self::DragAndDropTab => "Drag and Drop Tab",
@@ -6352,6 +6357,7 @@ impl TelemetryEventDesc for TelemetryEventDiscriminants {
             Self::AuthToggleFAQ => "Toggled FAQ Page when logging in",
             Self::OpenAuthPrivacySettings => "Privacy settings are open during sign-in",
             Self::TabRenamed => "Changed tab title",
+            Self::PlanTitleRenamed => "User renamed a plan title from the header bar",
             Self::MoveActiveTab => "Move active tab left or right",
             Self::MoveTab => "Move tab left or right",
             Self::DragAndDropTab => "Tab dragged and dropped",

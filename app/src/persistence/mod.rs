@@ -384,5 +384,6 @@ pub enum ModelEvent {
         content: String,
         version: i32,
         title: String,
+        user_title_locked: bool,
     },
 }

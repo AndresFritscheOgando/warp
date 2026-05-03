@@ -125,6 +125,9 @@ pub struct AIDocument {
     pub restored_from: Option<AIDocumentVersion>,
     /// The set of pane group entity IDs in which this document is currently visible.
     pub visible_in_pane_groups: HashSet<EntityId>,
+    /// When true, agent streaming updates will not overwrite the title.
+    /// Set by `rename_document_title` when the user explicitly renames the plan.
+    pub user_title_locked: bool,
 }
 
 pub enum AIDocumentInstance {
@@ -218,6 +221,11 @@ impl AIDocumentModel {
             pending_document_queue: Vec::new(),
             streaming_create_documents: HashMap::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub fn is_document_dirty_for_save(&self, id: &AIDocumentId) -> bool {
+        self.content_dirty_flags.get(id).copied().unwrap_or(false)
     }
 
     /// Sends a request to create a new cloud notebook with the document's contents.
@@ -425,6 +433,7 @@ impl AIDocumentModel {
             created_at,
             restored_from: None,
             visible_in_pane_groups: HashSet::new(),
+            user_title_locked: false,
         };
         self.latest_document_id_by_conversation_id
             .insert(conversation_id, id);
@@ -492,7 +501,9 @@ impl AIDocumentModel {
             return;
         };
 
-        doc.title = new_title.to_owned();
+        if !doc.user_title_locked {
+            doc.title = new_title.to_owned();
+        }
         let editor_handle = doc.editor.clone();
         editor_handle.update(ctx, |editor, editor_ctx| {
             editor.update_to_new_markdown(&post_process_notebook(new_content), editor_ctx);
@@ -713,6 +724,7 @@ impl AIDocumentModel {
         id: AIDocumentId,
         persisted_content: &str,
         persisted_title: Option<&str>,
+        persisted_user_title_locked: bool,
         ctx: &mut ModelContext<Self>,
     ) {
         let Some(doc) = self.documents.get_mut(&id) else {
@@ -736,8 +748,20 @@ impl AIDocumentModel {
                 Local::now(),
                 ctx,
             );
+            if let Some(doc) = self.documents.get_mut(&id) {
+                doc.user_title_locked = persisted_user_title_locked;
+            }
             return;
         };
+
+        // Restore the user title lock and, if locked, the persisted title wins over the
+        // conversation-restored title (the user explicitly chose it).
+        doc.user_title_locked = persisted_user_title_locked;
+        if persisted_user_title_locked {
+            if let Some(title) = persisted_title {
+                doc.title = title.to_owned();
+            }
+        }
 
         let current_content = doc.editor.as_ref(ctx).markdown_unescaped(ctx);
         if current_content == persisted_content {
@@ -1019,6 +1043,7 @@ impl AIDocumentModel {
             content,
             version: doc.version.0 as i32,
             title: doc.title.clone(),
+            user_title_locked: doc.user_title_locked,
         };
         if let Err(err) = sender.try_send(event) {
             log::error!("Error persisting AI document content for {id}: {err}");
@@ -1040,6 +1065,42 @@ impl AIDocumentModel {
         UpdateManager::handle(ctx).update(ctx, |update_manager, ctx| {
             update_manager.update_notebook_data(content.into(), sync_id.into(), ctx);
         });
+    }
+
+    fn maybe_update_cloud_notebook_title(
+        &mut self,
+        id: &AIDocumentId,
+        title: String,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let Some(doc) = self.documents.get(id) else {
+            return;
+        };
+        let Some(sync_id) = doc.sync_id else {
+            return;
+        };
+        UpdateManager::handle(ctx).update(ctx, |update_manager, ctx| {
+            update_manager.update_notebook_title(title.into(), sync_id.into(), ctx);
+        });
+    }
+
+    /// Rename the document title in response to a user action.
+    ///
+    /// Sets `user_title_locked` so subsequent agent streaming updates will not
+    /// overwrite the new title. Persists to SQLite and updates Warp Drive if synced.
+    pub fn rename_document_title(
+        &mut self,
+        id: &AIDocumentId,
+        new_title: impl Into<String>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let title = new_title.into();
+        self.update_title(id, &title, AIDocumentUpdateSource::User, ctx);
+        if let Some(doc) = self.documents.get_mut(id) {
+            doc.user_title_locked = true;
+        }
+        self.enqueue_save(id);
+        self.maybe_update_cloud_notebook_title(id, title, ctx);
     }
 
     /// Get a specific version of a document by version.

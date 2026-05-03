@@ -1958,6 +1958,7 @@ impl PaneGroup {
                             version,
                             content,
                             title,
+                            user_title_locked,
                         } => {
                             // Parse the document_id from string to AIDocumentId
                             let doc_id = match AIDocumentId::try_from(document_id.as_str()) {
@@ -1978,6 +1979,7 @@ impl PaneGroup {
                                         doc_id,
                                         persisted_content,
                                         title.as_deref(),
+                                        user_title_locked,
                                         ctx,
                                     );
                                 });

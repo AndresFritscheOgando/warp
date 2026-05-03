@@ -727,8 +727,16 @@ fn handle_model_event(event: ModelEvent, connection: &mut SqliteConnection) -> a
             content,
             version,
             title,
-        } => save_ai_document_content(connection, &document_id, &content, version, &title)
-            .context("error saving AI document content"),
+            user_title_locked,
+        } => save_ai_document_content(
+            connection,
+            &document_id,
+            &content,
+            version,
+            &title,
+            user_title_locked,
+        )
+        .context("error saving AI document content"),
     }
 }
 
@@ -1268,6 +1276,7 @@ fn save_pane_state(
                 version,
                 content,
                 title,
+                user_title_locked,
             } => {
                 let ai_document_pane = model::NewAIDocumentPane {
                     id,
@@ -1275,6 +1284,7 @@ fn save_pane_state(
                     version: *version,
                     content: content.clone(),
                     title: title.clone(),
+                    user_title_locked: *user_title_locked as i32,
                 };
 
                 diesel::insert_into(schema::ai_document_panes::dsl::ai_document_panes)
@@ -1308,6 +1318,7 @@ fn save_ai_document_content(
     doc_content: &str,
     doc_version: i32,
     doc_title: &str,
+    doc_user_title_locked: bool,
 ) -> Result<()> {
     use schema::ai_document_panes::dsl::*;
 
@@ -1316,6 +1327,7 @@ fn save_ai_document_content(
             content.eq(Some(doc_content)),
             version.eq(doc_version),
             title.eq(Some(doc_title)),
+            user_title_locked.eq(doc_user_title_locked as i32),
         ))
         .execute(conn)?;
 
@@ -2582,6 +2594,7 @@ fn read_node(conn: &mut SqliteConnection, node: model::PaneNode) -> Result<PaneN
                         version: ai_document_pane.version,
                         content: ai_document_pane.content,
                         title: ai_document_pane.title,
+                        user_title_locked: ai_document_pane.user_title_locked != 0,
                     })
                 }
                 AMBIENT_AGENT_PANE_KIND => {

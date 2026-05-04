@@ -1208,6 +1208,38 @@ impl AIConversation {
         }
     }
 
+    pub fn update_plan_title(
+        &mut self,
+        document_uid: AIDocumentId,
+        title: String,
+        terminal_view_id: Option<EntityId>,
+        ctx: &mut ModelContext<BlocklistAIHistoryModel>,
+    ) {
+        let document_uid = document_uid.to_string();
+        for artifact in &mut self.artifacts {
+            if let Artifact::Plan {
+                document_uid: doc_uid,
+                title: ref mut artifact_title,
+                ..
+            } = artifact
+            {
+                if doc_uid == &document_uid {
+                    *artifact_title = Some(title);
+                    let updated_artifact = artifact.clone();
+                    self.write_updated_conversation_state(ctx);
+                    if let Some(terminal_view_id) = terminal_view_id {
+                        ctx.emit(BlocklistAIHistoryEvent::UpdatedConversationArtifacts {
+                            terminal_view_id,
+                            conversation_id: self.id,
+                            artifact: updated_artifact,
+                        });
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
     pub fn initial_query(&self) -> Option<String> {
         self.root_task_exchanges()
             .flat_map(|exchange| exchange.input.iter())

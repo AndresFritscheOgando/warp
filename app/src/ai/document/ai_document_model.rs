@@ -1088,6 +1088,7 @@ impl AIDocumentModel {
     ///
     /// Sets `user_title_locked` so subsequent agent streaming updates will not
     /// overwrite the new title. Persists to SQLite and updates Warp Drive if synced.
+    /// Empty or whitespace-only titles are ignored.
     pub fn rename_document_title(
         &mut self,
         id: &AIDocumentId,
@@ -1095,12 +1096,27 @@ impl AIDocumentModel {
         ctx: &mut ModelContext<Self>,
     ) {
         let title = new_title.into();
+        let title = title.trim().to_owned();
+        if title.is_empty() {
+            return;
+        }
         self.update_title(id, &title, AIDocumentUpdateSource::User, ctx);
         if let Some(doc) = self.documents.get_mut(id) {
             doc.user_title_locked = true;
         }
         self.enqueue_save(id);
-        self.maybe_update_cloud_notebook_title(id, title, ctx);
+        self.maybe_update_cloud_notebook_title(id, title.clone(), ctx);
+        // Update the conversation plan artifact title so listing surfaces stay in sync.
+        let conversation_id = self.documents.get(id).map(|doc| doc.conversation_id);
+        if let Some(conversation_id) = conversation_id {
+            let doc_id = *id;
+            BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                let terminal_view_id = history.terminal_view_id_for_conversation(&conversation_id);
+                if let Some(conversation) = history.conversation_mut(&conversation_id) {
+                    conversation.update_plan_title(doc_id, title, terminal_view_id, ctx);
+                }
+            });
+        }
     }
 
     /// Get a specific version of a document by version.

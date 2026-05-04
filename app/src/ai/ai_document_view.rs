@@ -890,7 +890,8 @@ impl AIDocumentView {
             })
             .unwrap_or_else(|| DEFAULT_PLANNING_DOCUMENT_TITLE.to_string());
 
-        // Renaming is not available during streaming or when viewing an earlier version.
+        // Renaming is not available during streaming, when viewing an earlier version,
+        // or in a read-only shared-session viewer.
         let is_renameable = {
             let model = AIDocumentModel::as_ref(app);
             let is_earlier_version = model
@@ -898,7 +899,15 @@ impl AIDocumentView {
                 .map(|doc| doc.version != self.document_version)
                 .unwrap_or(false);
             let is_streaming = model.is_document_creation_streaming(&self.document_id);
-            !is_earlier_version && !is_streaming
+            let is_shared_session_viewer = model
+                .get_conversation_id_for_document_id(&self.document_id)
+                .and_then(|conv_id| {
+                    BlocklistAIHistoryModel::as_ref(app)
+                        .conversation(&conv_id)
+                        .map(|c| c.is_viewing_shared_session())
+                })
+                .unwrap_or(false);
+            !is_earlier_version && !is_streaming && !is_shared_session_viewer
         };
 
         if !is_renameable {

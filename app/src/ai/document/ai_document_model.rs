@@ -1096,7 +1096,14 @@ impl AIDocumentModel {
         ctx: &mut ModelContext<Self>,
     ) {
         let title = new_title.into();
-        let title = title.trim().to_owned();
+        // Normalize: trim whitespace, collapse embedded newlines/control chars to a space,
+        // and cap length so the value is safe to store and display.
+        let title: String = title
+            .chars()
+            .map(|c| if c < ' ' { ' ' } else { c })
+            .collect();
+        let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+        let title = title.chars().take(256).collect::<String>();
         if title.is_empty() {
             return;
         }
@@ -1210,6 +1217,8 @@ impl AIDocumentModel {
         plan_folder_id: ServerId,
         ctx: &mut ModelContext<Self>,
     ) {
+        // TODO: user_title_locked is not propagated to CloudNotebookModel because the server
+        // schema has no such field. Cross-device lock persistence requires a server API change.
         let client_id = ClientId::new();
         let server_conversation_id = self.get_server_conversation_id(&id, ctx);
         if let Some(document) = self.documents.get_mut(&id) {

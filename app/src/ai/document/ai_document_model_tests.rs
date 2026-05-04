@@ -792,13 +792,7 @@ fn test_rename_document_title_marks_dirty_for_save() {
         let model_handle = app.add_model(|_ctx| AIDocumentModel::new_for_test());
 
         let doc_id = model_handle.update(&mut app, |model, ctx| {
-            model.create_document(
-                "Original",
-                "# Content",
-                AIConversationId::new(),
-                None,
-                ctx,
-            )
+            model.create_document("Original", "# Content", AIConversationId::new(), None, ctx)
         });
 
         model_handle.update(&mut app, |model, ctx| {
@@ -846,7 +840,10 @@ fn test_rename_document_title_twice_keeps_latest_title() {
                 doc.title, "Second Rename",
                 "Second rename must overwrite the first"
             );
-            assert!(doc.user_title_locked, "Lock must remain set after re-rename");
+            assert!(
+                doc.user_title_locked,
+                "Lock must remain set after re-rename"
+            );
         });
     });
 }

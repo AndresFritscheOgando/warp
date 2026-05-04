@@ -31,7 +31,9 @@ use crate::{
         AIDocumentId, AIDocumentInstance, AIDocumentModel, AIDocumentModelEvent,
         AIDocumentUpdateSource, AIDocumentVersion,
     },
-    editor::{EditorView, Event as EditorEvent, InteractionState, SingleLineEditorOptions, TextOptions},
+    editor::{
+        EditorView, Event as EditorEvent, InteractionState, SingleLineEditorOptions, TextOptions,
+    },
     menu::{Menu, MenuItem, MenuItemFields},
     notebooks::{
         editor::{

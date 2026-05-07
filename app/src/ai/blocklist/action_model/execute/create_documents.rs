@@ -112,11 +112,19 @@ impl CreateDocumentsExecutor {
                     });
                 }
 
+                // Use the model's effective title: if the user already renamed this plan,
+                // the agent-provided title must not replace it in the artifact.
+                let effective_title = model
+                    .as_ref(ctx)
+                    .get_current_document(&id)
+                    .map(|doc| doc.title.clone())
+                    .unwrap_or_else(|| document.title.clone());
+
                 // Add plan artifact to the conversation.
                 let artifact = Artifact::Plan {
                     document_uid: id.to_string(),
                     notebook_uid: None, // Will be updated when synced to Warp Drive
-                    title: Some(document.title.clone()),
+                    title: Some(effective_title),
                 };
                 let terminal_view_id = self.terminal_view_id;
                 BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {

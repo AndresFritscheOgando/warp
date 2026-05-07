@@ -34,6 +34,7 @@ diesel::table! {
         version -> Integer,
         content -> Nullable<Text>,
         title -> Nullable<Text>,
+        user_title_locked -> Integer,
     }
 }
 

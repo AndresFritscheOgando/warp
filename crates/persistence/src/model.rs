@@ -919,6 +919,7 @@ pub struct AIDocumentPane {
     pub version: i32,
     pub content: Option<String>,
     pub title: Option<String>,
+    pub user_title_locked: i32,
 }
 
 #[derive(Debug, Insertable)]
@@ -929,6 +930,7 @@ pub struct NewAIDocumentPane {
     pub version: i32,
     pub content: Option<String>,
     pub title: Option<String>,
+    pub user_title_locked: i32,
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]

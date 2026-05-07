@@ -233,6 +233,7 @@ pub enum AIDocumentPaneSnapshot {
         version: i32,
         content: Option<String>,
         title: Option<String>,
+        user_title_locked: bool,
     },
 }
 

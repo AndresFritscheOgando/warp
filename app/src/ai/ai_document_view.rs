@@ -31,7 +31,9 @@ use crate::{
         AIDocumentId, AIDocumentInstance, AIDocumentModel, AIDocumentModelEvent,
         AIDocumentUpdateSource, AIDocumentVersion,
     },
-    editor::InteractionState,
+    editor::{
+        EditorView, Event as EditorEvent, InteractionState, SingleLineEditorOptions, TextOptions,
+    },
     menu::{Menu, MenuItem, MenuItemFields},
     notebooks::{
         editor::{
@@ -115,6 +117,7 @@ pub enum AIDocumentAction {
     CopyPlanId,
     ShowInWarpDrive,
     AttachToActiveSession,
+    RenameTitle,
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +173,10 @@ pub struct AIDocumentView {
     synced_status_mouse_state: MouseStateHandle,
     view_position_id: String,
     version_button: ViewHandle<ActionButton>,
+    // Title rename state
+    title_rename_editor: ViewHandle<EditorView>,
+    is_renaming_title: bool,
+    title_hover_state: MouseStateHandle,
 }
 
 impl AIDocumentView {
@@ -403,6 +410,8 @@ impl AIDocumentView {
                 })
         });
 
+        let title_rename_editor = Self::build_title_rename_editor(ctx);
+
         let mut me = Self {
             document_id,
             document_version,
@@ -420,6 +429,9 @@ impl AIDocumentView {
             synced_status_mouse_state: MouseStateHandle::default(),
             view_position_id,
             version_button,
+            title_rename_editor,
+            is_renaming_title: false,
+            title_hover_state: MouseStateHandle::default(),
         };
         // Force update the editor view based on the initial document version
         me.refresh(ctx);
@@ -553,6 +565,90 @@ impl AIDocumentView {
             pc.set_shareable_object(server_id.map(ShareableObject::WarpDriveObject), ctx);
             pc.refresh_pane_header_overflow_menu_items(ctx);
         });
+        ctx.notify();
+    }
+
+    fn build_title_rename_editor(ctx: &mut ViewContext<Self>) -> ViewHandle<EditorView> {
+        let editor = ctx.add_typed_action_view(|ctx| {
+            let appearance = Appearance::as_ref(ctx);
+            let options = SingleLineEditorOptions {
+                text: TextOptions::ui_text(Some(appearance.ui_font_size()), appearance),
+                select_all_on_focus: true,
+                ..Default::default()
+            };
+            EditorView::single_line(options, ctx)
+        });
+        ctx.subscribe_to_view(&editor, |me, _, event, ctx| {
+            me.handle_title_rename_editor_event(event, ctx);
+        });
+        editor
+    }
+
+    fn handle_title_rename_editor_event(
+        &mut self,
+        event: &EditorEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if self.is_renaming_title {
+            match event {
+                EditorEvent::Blurred | EditorEvent::Enter => {
+                    self.commit_title_rename(ctx);
+                }
+                EditorEvent::Escape => {
+                    self.cancel_title_rename(ctx);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn start_title_rename(&mut self, ctx: &mut ViewContext<Self>) {
+        let title = AIDocumentModel::as_ref(ctx)
+            .get_current_document(&self.document_id)
+            .map(|doc| {
+                if doc.title.is_empty() {
+                    String::new()
+                } else {
+                    doc.title.clone()
+                }
+            })
+            .unwrap_or_default();
+
+        self.title_rename_editor.update(ctx, |editor, ctx| {
+            editor.clear_buffer_and_reset_undo_stack(ctx);
+            editor.insert_selected_text(&title, ctx);
+        });
+        self.is_renaming_title = true;
+        ctx.focus(&self.title_rename_editor);
+        ctx.notify();
+    }
+
+    fn commit_title_rename(&mut self, ctx: &mut ViewContext<Self>) {
+        if !self.is_renaming_title {
+            return;
+        }
+        self.is_renaming_title = false;
+        let new_title = self
+            .title_rename_editor
+            .as_ref(ctx)
+            .buffer_text(ctx)
+            .trim()
+            .to_owned();
+        if !new_title.is_empty() {
+            let document_id = self.document_id;
+            AIDocumentModel::handle(ctx).update(ctx, |model, ctx| {
+                model.rename_document_title(&document_id, new_title, ctx);
+            });
+            send_telemetry_from_ctx!(TelemetryEvent::PlanTitleRenamed, ctx);
+        }
+        ctx.notify();
+    }
+
+    fn cancel_title_rename(&mut self, ctx: &mut ViewContext<Self>) {
+        if !self.is_renaming_title {
+            return;
+        }
+        self.is_renaming_title = false;
         ctx.notify();
     }
 
@@ -718,10 +814,6 @@ impl AIDocumentView {
         app: &AppContext,
     ) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(app);
-        let title = AIDocumentModel::as_ref(app)
-            .get_current_document(&self.document_id)
-            .map(|doc| doc.title.clone())
-            .unwrap_or_else(|| DEFAULT_PLANNING_DOCUMENT_TITLE.to_string());
 
         let version_button = SavePosition::new(
             ChildView::new(&self.version_button).finish(),
@@ -764,7 +856,7 @@ impl AIDocumentView {
         let button_count = should_show_close_button as u32 + header_ctx.has_overflow_items as u32;
         render_three_column_header(
             left_row,
-            render_pane_header_title_text(title, appearance, ClipConfig::start()),
+            self.render_title_area(app),
             right_row.finish(),
             CenteredHeaderEdgeWidth {
                 min: button_count as f32 * ICON_DIMENSIONS,
@@ -773,6 +865,105 @@ impl AIDocumentView {
             header_ctx.header_left_inset,
             header_ctx.draggable_state.is_dragging(),
         )
+    }
+
+    /// Render the title area in the center of the plan header.
+    ///
+    /// Shows the inline editor when renaming, a clickable title+pencil-icon
+    /// when hovered and the plan is renameable, or a plain title label otherwise.
+    fn render_title_area(&self, app: &AppContext) -> Box<dyn Element> {
+        let appearance = Appearance::as_ref(app);
+
+        // While the rename editor is active, show it in-place.
+        if self.is_renaming_title {
+            return ConstrainedBox::new(ChildView::new(&self.title_rename_editor).finish())
+                .with_height(ICON_DIMENSIONS)
+                .finish();
+        }
+
+        let title = AIDocumentModel::as_ref(app)
+            .get_current_document(&self.document_id)
+            .map(|doc| {
+                if doc.title.is_empty() {
+                    DEFAULT_PLANNING_DOCUMENT_TITLE.to_string()
+                } else {
+                    doc.title.clone()
+                }
+            })
+            .unwrap_or_else(|| DEFAULT_PLANNING_DOCUMENT_TITLE.to_string());
+
+        // Renaming is not available during streaming, when viewing an earlier version,
+        // or in a read-only shared-session viewer.
+        let is_renameable = {
+            let model = AIDocumentModel::as_ref(app);
+            let is_earlier_version = model
+                .get_current_document(&self.document_id)
+                .map(|doc| doc.version != self.document_version)
+                .unwrap_or(false);
+            let is_streaming = model.is_document_creation_streaming(&self.document_id);
+            let is_shared_session_viewer = model
+                .get_conversation_id_for_document_id(&self.document_id)
+                .and_then(|conv_id| {
+                    BlocklistAIHistoryModel::as_ref(app)
+                        .conversation(&conv_id)
+                        .map(|c| c.is_viewing_shared_session())
+                })
+                .unwrap_or(false);
+            !is_earlier_version && !is_streaming && !is_shared_session_viewer
+        };
+
+        if !is_renameable {
+            return render_pane_header_title_text(title, appearance, ClipConfig::start());
+        }
+
+        // Renameable: wrap title in a hoverable so we can show the pencil on hover
+        // and dispatch RenameTitle on click.
+        let title_hover_state = self.title_hover_state.clone();
+        let font_color = appearance
+            .theme()
+            .sub_text_color(appearance.theme().background());
+        let font_size = appearance.ui_font_size();
+        let font_family = appearance.ui_font_family();
+
+        Hoverable::new(title_hover_state, move |hover_state| {
+            let is_hovered = hover_state.is_hovered();
+            let title_text = {
+                use warpui::elements::Text;
+                Text::new_inline(title.clone(), font_family.clone(), font_size)
+                    .with_color(font_color.into())
+                    .with_clip(ClipConfig::start())
+                    .finish()
+            };
+
+            if is_hovered {
+                let icon_color = font_color.into();
+                let edit_icon = ConstrainedBox::new(
+                    Icon::Pencil
+                        .to_warpui_icon(ThemeFill::Solid(icon_color))
+                        .finish(),
+                )
+                .with_width(12.)
+                .with_height(12.)
+                .finish();
+
+                Flex::row()
+                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                    .with_main_axis_size(MainAxisSize::Min)
+                    .with_child(title_text)
+                    .with_child(Container::new(edit_icon).with_margin_left(4.).finish())
+                    .finish()
+            } else {
+                title_text
+            }
+        })
+        .on_click(|ctx, _, _| {
+            ctx.dispatch_typed_action(
+                PaneHeaderAction::<AIDocumentAction, AIDocumentAction>::CustomAction(
+                    AIDocumentAction::RenameTitle,
+                ),
+            );
+        })
+        .finish()
     }
 
     fn set_editor_model(
@@ -1182,6 +1373,9 @@ impl TypedActionView for AIDocumentView {
             }
             AIDocumentAction::AttachToActiveSession => {
                 ctx.emit(AIDocumentEvent::AttachPlanAsContext(self.document_id));
+            }
+            AIDocumentAction::RenameTitle => {
+                self.start_title_rename(ctx);
             }
         }
     }

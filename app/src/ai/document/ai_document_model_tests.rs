@@ -681,3 +681,169 @@ fn test_streamed_agent_update_matches_reset_with_markdown_for_code_block() {
         }
     });
 }
+
+#[test]
+fn test_rename_document_title_sets_title_and_locks() {
+    App::test((), |mut app| async move {
+        initialize_app_for_ai_document_tests(&mut app);
+        let model_handle = app.add_model(|_ctx| AIDocumentModel::new_for_test());
+
+        let doc_id = model_handle.update(&mut app, |model, ctx| {
+            model.create_document(
+                "Auto Title",
+                "# Content",
+                AIConversationId::new(),
+                None,
+                ctx,
+            )
+        });
+
+        // Rename via the user-facing method.
+        model_handle.update(&mut app, |model, ctx| {
+            model.rename_document_title(&doc_id, "My Custom Title", ctx);
+        });
+
+        model_handle.update(&mut app, |model, _ctx| {
+            let doc = model
+                .get_current_document(&doc_id)
+                .expect("Document should exist");
+            assert_eq!(doc.title, "My Custom Title");
+            assert!(
+                doc.user_title_locked,
+                "user_title_locked should be true after rename"
+            );
+        });
+    });
+}
+
+#[test]
+fn test_agent_update_does_not_overwrite_locked_title() {
+    App::test((), |mut app| async move {
+        initialize_app_for_ai_document_tests(&mut app);
+        let model_handle = app.add_model(|_ctx| AIDocumentModel::new_for_test());
+
+        let doc_id = model_handle.update(&mut app, |model, ctx| {
+            model.create_document(
+                "Agent Title",
+                "# Content",
+                AIConversationId::new(),
+                None,
+                ctx,
+            )
+        });
+
+        // User renames the document.
+        model_handle.update(&mut app, |model, ctx| {
+            model.rename_document_title(&doc_id, "User Title", ctx);
+        });
+
+        // Agent tries to update the title via streaming.
+        model_handle.update(&mut app, |model, ctx| {
+            model.apply_streamed_agent_update(&doc_id, "Agent New Title", "# Updated", ctx);
+        });
+
+        // Title should still be the user-set one.
+        model_handle.update(&mut app, |model, _ctx| {
+            let doc = model
+                .get_current_document(&doc_id)
+                .expect("Document should exist");
+            assert_eq!(
+                doc.title, "User Title",
+                "Agent update must not overwrite a user-locked title"
+            );
+        });
+    });
+}
+
+#[test]
+fn test_agent_update_overwrites_unlocked_title() {
+    App::test((), |mut app| async move {
+        initialize_app_for_ai_document_tests(&mut app);
+        let model_handle = app.add_model(|_ctx| AIDocumentModel::new_for_test());
+
+        let doc_id = model_handle.update(&mut app, |model, ctx| {
+            model.create_document(
+                "Agent Title",
+                "# Content",
+                AIConversationId::new(),
+                None,
+                ctx,
+            )
+        });
+
+        // No user rename — agent update should apply normally.
+        model_handle.update(&mut app, |model, ctx| {
+            model.apply_streamed_agent_update(&doc_id, "Agent New Title", "# Updated", ctx);
+        });
+
+        model_handle.update(&mut app, |model, _ctx| {
+            let doc = model
+                .get_current_document(&doc_id)
+                .expect("Document should exist");
+            assert_eq!(doc.title, "Agent New Title");
+        });
+    });
+}
+
+#[test]
+fn test_rename_document_title_marks_dirty_for_save() {
+    App::test((), |mut app| async move {
+        initialize_app_for_ai_document_tests(&mut app);
+        let model_handle = app.add_model(|_ctx| AIDocumentModel::new_for_test());
+
+        let doc_id = model_handle.update(&mut app, |model, ctx| {
+            model.create_document("Original", "# Content", AIConversationId::new(), None, ctx)
+        });
+
+        model_handle.update(&mut app, |model, ctx| {
+            model.rename_document_title(&doc_id, "New Name", ctx);
+        });
+
+        model_handle.update(&mut app, |model, _ctx| {
+            assert!(
+                model.is_document_dirty_for_save(&doc_id),
+                "rename_document_title should mark the document dirty for save"
+            );
+        });
+    });
+}
+
+#[test]
+fn test_rename_document_title_twice_keeps_latest_title() {
+    App::test((), |mut app| async move {
+        initialize_app_for_ai_document_tests(&mut app);
+        let model_handle = app.add_model(|_ctx| AIDocumentModel::new_for_test());
+
+        let doc_id = model_handle.update(&mut app, |model, ctx| {
+            model.create_document(
+                "Agent Title",
+                "# Content",
+                AIConversationId::new(),
+                None,
+                ctx,
+            )
+        });
+
+        model_handle.update(&mut app, |model, ctx| {
+            model.rename_document_title(&doc_id, "First Rename", ctx);
+        });
+
+        model_handle.update(&mut app, |model, ctx| {
+            model.rename_document_title(&doc_id, "Second Rename", ctx);
+        });
+
+        model_handle.update(&mut app, |model, _ctx| {
+            let doc = model
+                .get_current_document(&doc_id)
+                .expect("Document should exist");
+            assert_eq!(
+                doc.title, "Second Rename",
+                "Second rename must overwrite the first"
+            );
+            assert!(
+                doc.user_title_locked,
+                "Lock must remain set after re-rename"
+            );
+        });
+    });
+}

@@ -45,9 +45,10 @@ impl PaneContent for AIDocumentPane {
         let document_id = *document_view.document_id();
         let ai_document_model = AIDocumentModel::as_ref(app);
         let content = ai_document_model.get_document_content(&document_id, app);
-        let title = ai_document_model
+        let (title, user_title_locked) = ai_document_model
             .get_current_document(&document_id)
-            .map(|doc| doc.title.clone());
+            .map(|doc| (Some(doc.title.clone()), doc.user_title_locked))
+            .unwrap_or((None, false));
         if content.is_none() {
             log::warn!(
                 "AI document snapshot: no content for {document_id} (document not in model)"
@@ -58,6 +59,7 @@ impl PaneContent for AIDocumentPane {
             version: document_view.document_version().0 as i32,
             content,
             title,
+            user_title_locked,
         })
     }
 
